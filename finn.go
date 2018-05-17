@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -862,6 +863,7 @@ func (m *nodeApplier) Apply(
 	respond func(interface{}) (interface{}, error),
 ) (interface{}, error) {
 	var val interface{}
+	var resp []byte
 	var err error
 	if mutate == nil {
 		// no apply, just do a level guard.
@@ -874,7 +876,21 @@ func (m *nodeApplier) Apply(
 	} else {
 		// this is happening on the leader node.
 		// apply the command to the raft log.
-		val, err = (*Node)(m).raftApplyCommand(cmd)
+		if m.level == Low && m.raft.Leader() != "" && m.raft.State() != raft.Leader {
+			// try forward request to leader
+			resp, _, err = raftredcon.Do(m.raft.Leader(), nil, cmd.Args...)
+			if err != nil {
+				return nil, err
+			}
+
+			if string(resp) == "OK" {
+				val = string(resp)
+			} else {
+				val, err = strconv.Atoi(string(resp))
+			}
+		} else {
+			val, err = (*Node)(m).raftApplyCommand(cmd)
+		}
 	}
 	if err != nil {
 		return nil, err
